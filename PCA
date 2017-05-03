@@ -1,0 +1,203 @@
+install.packages("car")
+install.packages("dplyr")
+
+library(dplyr)
+library(car)
+
+setwd("..../Datasets.....")
+data=read.csv("loans data.csv",stringsAsFactors = FALSE)
+str(data)
+
+head(data)
+str(data)
+
+colSums(is.na(data))
+
+data$Interest.Rate<-as.numeric(gsub("%","",data$Interest.Rate))
+data$Debt.To.Income.Ratio<-as.numeric(gsub("%","",data$Debt.To.Income.Ratio))
+
+table(data$Open.CREDIT.Lines)
+data$Open.CREDIT.Lines<-as.numeric(data$Open.CREDIT.Lines)
+data$Open.CREDIT.Lines[is.na(data$Open.CREDIT.Lines)]<-mean(data$Open.CREDIT.Lines,na.rm=T)
+
+data$Amount.Requested<-as.numeric(data$Amount.Requested)
+data$Amount.Requested[is.na(data$Amount.Requested)]<-mean(data$Amount.Requested,na.rm=T)
+
+data$Amount.Funded.By.Investors<-as.numeric(data$Amount.Funded.By.Investors)
+data$Amount.Funded.By.Investors[is.na(data$Amount.Funded.By.Investors)] <- 
+    mean(data$Amount.Funded.By.Investors,na.rm=T)
+
+data$Revolving.CREDIT.Balance<-as.numeric(data$Revolving.CREDIT.Balance)
+data$Revolving.CREDIT.Balance[is.na(data$Revolving.CREDIT.Balance)]<-
+  mean(data$Revolving.CREDIT.Balance,na.rm=T)
+
+data$Monthly.Income[is.na(data$Monthly.Income)] <- mean(data$Monthly.Income,na.rm=T)
+
+data$Amount.Funded.By.Investors<-NULL
+
+data$Inquiries.in.the.Last.6.Months[is.na(data$Inquiries.in.the.Last.6.Months)]<-0
+
+data<-data %>%
+  mutate(f1=as.numeric(substr(FICO.Range,1,3)),
+         f2=as.numeric(substr(FICO.Range,5,7)),
+         fico=0.5*(f1+f2)
+  ) %>%
+  select(-FICO.Range,-f1,-f2)
+
+table(data$el)
+data <- data %>% 
+  mutate(el=ifelse(substr(Employment.Length,1,2)=="10",10,Employment.Length),
+       el=ifelse(substr(Employment.Length,1,1)=="<",0,el),
+       el=gsub("years","",el),
+       el=gsub("year","",el),
+       el=as.numeric(el)) %>%
+  select(-Employment.Length)
+
+data$el[is.na(data$el)] <- 4
+
+table(data$Home.Ownership)
+data<-data %>%
+  mutate(HW_RENT=as.numeric(Home.Ownership=="RENT"),
+         HW_MORT=as.numeric(Home.Ownership=="MORTGAGE"),
+         HW_OWN=as.numeric(Home.Ownership=="OWN")) %>%
+  select(-Home.Ownership)
+
+table(data$Loan.Purpose)
+summarise(group_by(data,Loan.Purpose), mean(Interest.Rate,na.rm=T))
+
+data<-data %>%
+  mutate(LP_cc=as.numeric(Loan.Purpose %in% c("credit_card","medical","small_business","vacation",
+                                              "wedding")),
+         LP_dc=as.numeric(Loan.Purpose %in% c("debt_consolidation","moving","other")),
+         LP_other=as.numeric(Loan.Purpose %in% c("credit_card","educational","home_improvement",
+                                                 "major_purchase"))
+  ) %>%
+  select(-Loan.Purpose)
+
+
+table(data$Loan.Length)
+
+data<-data %>%
+  mutate(LL_36=as.numeric(Loan.Length=="36 months")) %>%
+  select(-Loan.Length)
+
+table(data$State)
+summarise(group_by(data,State), mean(Interest.Rate,na.rm=T))
+
+data<-data %>%
+  select(-State)
+
+sapply(data, function(x) sum(is.na(x)))
+
+data <- data[-which(is.na(data$ID)),]
+data <- data[-which(is.na(data$Debt.To.Income.Ratio)),]
+data <- data[-which(is.na(data$HW_RENT)),]
+data <- data[-which(is.na(data$LL_36)),]
+
+set.seed(2)
+s<-sample(1:nrow(data),0.7*nrow(data))
+train<-data[s,]
+test<-data[-s,]
+
+head(train)
+
+fit<-lm(Interest.Rate~.-ID,data=train)
+
+vif(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT,data=train)
+vif(fit)
+
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio,data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance,data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance 
+       -el,data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance -el -LP_other,
+       data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance -el -LP_other
+       -LP_dc,data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance -el -LP_other
+       -LP_dc -LP_cc,data=train)
+summary(fit)
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance -el -LP_other
+       -LP_dc -LP_cc -HW_OWN,data=train)
+summary(fit)
+
+plot(fit,which=1)
+
+plot(fit,which=2)
+
+plot(fit,which=3)
+
+plot(fit,which=4)
+
+#rmse for train
+mean((train$Interest.Rate-predict(fit,newdata=train))**2) %>%
+  sqrt()
+#rmse for test
+mean((test$Interest.Rate-predict(fit,newdata=test))**2) %>%
+  sqrt()
+
+train$fico2=train$fico*train$fico
+
+fit<-lm(Interest.Rate~. -ID - HW_MORT-Debt.To.Income.Ratio -Revolving.CREDIT.Balance -el -LP_other
+       -LP_dc -LP_cc -HW_OWN,data=train)
+summary(fit)
+
+#rmse for train
+mean((train$Interest.Rate-predict(fit,newdata=train))**2) %>%
+  sqrt()
+#rmse for test
+mean((test$Interest.Rate-predict(fit,newdata=test))**2) %>%
+  sqrt()
+
+plot(fit,which = 1)
+
+# Applying PCA
+str(data)
+
+data$ID <- NULL
+response<-train$Interest.Rate
+data$Interest.Rate<-NULL
+
+colnames(data)
+
+pca.train<-train
+pca.test<-test
+
+prin_comp<-prcomp(pca.train, scale.=T)
+names(prin_comp)
+
+biplot(prin_comp,scale = 0)
+
+summary(prin_comp)
+plot(prin_comp$sdev,type = "b")
+
+prin_comp$x
+train.data<-data.frame(Interest.Rate=response,prin_comp$x)
+
+test.data <- predict(prin_comp, newdata = pca.test)
+test.data <- as.data.frame(test.data)
+
+fit1 <- lm(Interest.Rate~. -PC11 -PC12 -PC13 -PC14 - PC15 -PC17 -PC16, data = train.data)
+vif(fit1)
+summary(fit1)
+
+mean((train.data$Interest.Rate-predict(fit1,newdata=train.data))**2) %>%
+  sqrt()
+#rmse for test
+mean((test$Interest.Rate-predict(fit1,newdata=test.data))**2) %>%
+  sqrt()
